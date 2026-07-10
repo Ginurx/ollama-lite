@@ -167,13 +167,25 @@ func launchCmd(args []string) error {
 
 	host := config.ConnectableHostFrom(hostOverride)
 
+	// Resolve the model: explicit --model, else the configured default in
+	// ~/.ollama-lite/config.json (per-app then last_model), else the first
+	// advertised model.
 	if model = strings.TrimSpace(model); model == "" {
+		model = config.LaunchDefaultModel(canonical)
+	}
+	if model == "" {
 		if models := config.Models(""); len(models) > 0 {
 			model = models[0]
 		}
 	}
 	if model == "" {
 		return fmt.Errorf("no model specified; pass --model <model> (e.g. --model gpt-oss:120b)")
+	}
+
+	// Remember this model as the default for next time. Best-effort: never block
+	// the launch if the config can't be written.
+	if err := config.SaveLaunchModel(canonical, model); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not save default model to ~/.ollama-lite/config.json: %v\n", err)
 	}
 
 	warnIfServerUnreachable(host)
@@ -189,7 +201,9 @@ Usage:
     ollama-lite launch <app> [--model MODEL] [--host HOST] [-- EXTRA_ARGS...]
 
 Flags:
-    --model MODEL   Model to use (default: first advertised model)
+    --model MODEL   Model to use. Defaults to the model saved for this app in
+                    ~/.ollama-lite/config.json, else the first advertised model.
+                    Passing --model records it as this app's default.
     --host HOST     ollama-lite address the app should connect to
                     (overrides OLLAMA_HOST; e.g. 127.0.0.1:11435)
 
@@ -197,8 +211,8 @@ Supported apps:
 %s
 
 Examples:
-    ollama-lite launch claude
-    ollama-lite launch claude --model gpt-oss:120b
+    ollama-lite launch claude --model gpt-oss:120b   # sets & remembers the model
+    ollama-lite launch claude                        # reuses the saved model
     ollama-lite launch codex -- --sandbox workspace-write
 
 Note: start the server first with "ollama-lite serve".

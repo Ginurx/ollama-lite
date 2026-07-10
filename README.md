@@ -70,16 +70,24 @@ app.
 ```sh
 # Start the server, then launch an app against it.
 ollama-lite serve &
-ollama-lite launch claude
-ollama-lite launch claude --model gpt-oss:120b
+ollama-lite launch claude --model gpt-oss:120b   # sets & remembers the model
+ollama-lite launch claude                        # reuses the saved model
 ollama-lite launch codex -- --sandbox workspace-write   # args after -- go to the app
 ```
 
-- `--model MODEL` — which model the app should use (default: the first advertised
-  model). Both `glm-5.2` and `glm-5.2:cloud` work — the server normalizes the suffix.
+- `--model MODEL` — which model the app should use. Both `glm-5.2` and
+  `glm-5.2:cloud` work — the server normalizes the suffix. If omitted, the model is
+  resolved from `~/.ollama-lite/config.json` (this app's saved model, then
+  `last_model`), falling back to the first advertised model. Passing `--model`
+  **records it as this app's default**, so subsequent launches need no `--model`.
 - `--host HOST` — the ollama-lite address the app should connect to (overrides
   `OLLAMA_HOST`); an unspecified bind like `0.0.0.0` is rewritten to loopback.
 - Anything after `--` is passed to the app unchanged.
+
+The launch default lives in `~/.ollama-lite/config.json`, which uses the **same
+structure as Ollama's `~/.ollama/config.json`** (`integrations.<app>.models` and
+`last_model`) — so you can copy your existing Ollama config over. This is
+ollama-lite's own file; the official `~/.ollama/config.json` is never modified.
 
 | App | Name | How it's configured |
 | --- | --- | --- |
@@ -132,6 +140,7 @@ ollama-lite specific:
 | `--host HOST:PORT` (serve flag) | Address to listen on; overrides `OLLAMA_HOST` |
 | `--models a,b,c` (serve flag) | Models to advertise on `/api/tags` and `/v1/models` |
 | `~/.ollama-lite/models.json` | JSON array of model names (used when `--models` is unset) |
+| `~/.ollama-lite/config.json` | Per-app launch default model (`integrations.<app>.models` / `last_model`); same structure as `~/.ollama/config.json` |
 | `OLLAMA_LITE_OLLAMA_VERSION` | Version string reported on `/api/version` (default tracks a real Ollama release) |
 
 If neither the flag nor the file is set, the advertised list is seeded from any
