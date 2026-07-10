@@ -12,14 +12,17 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
 	"strings"
+	"time"
 
 	"ollama-lite/internal/auth"
 	"ollama-lite/internal/config"
+	"ollama-lite/internal/launch"
 	"ollama-lite/internal/server"
 )
 
@@ -35,6 +38,8 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		err = serveCmd(os.Args[2:])
+	case "launch":
+		err = launchCmd(os.Args[2:])
 	case "signin":
 		err = signinCmd(os.Args[2:])
 	case "signout":
@@ -64,6 +69,7 @@ Usage:
 
 Commands:
     serve      Start the Ollama-compatible server (proxies cloud models)
+    launch     Launch an AI app wired to use ollama-lite as its backend
     signin     Connect this machine to your ollama.com account
     signout    Disconnect this machine from ollama.com
     whoami     Show the signed-in ollama.com account
@@ -75,6 +81,7 @@ Environment (shared with the official Ollama):
     OLLAMA_CLOUD_BASE_URL    Cloud endpoint (default https://ollama.com)
 
 Run "ollama-lite serve --help" for serve flags.
+Run "ollama-lite launch --help" for the list of supported apps.
 `)
 }
 
@@ -102,6 +109,112 @@ func serveCmd(args []string) error {
 	}
 
 	return server.Serve(ctx, addr, list)
+}
+
+// launchCmd starts an AI app configured to use the ollama-lite server as its
+// backend. Usage: ollama-lite launch <app> [--model M] [--host H] [-- extra...]
+func launchCmd(args []string) error {
+	// Everything after the first "--" is passed through to the app unchanged.
+	var extra []string
+	for i, a := range args {
+		if a == "--" {
+			extra = append([]string{}, args[i+1:]...)
+			args = args[:i]
+			break
+		}
+	}
+
+	var model, hostOverride, name string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--model" || a == "-model":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--model requires a value")
+			}
+			model, i = args[i+1], i+1
+		case strings.HasPrefix(a, "--model="):
+			model = strings.TrimPrefix(a, "--model=")
+		case a == "--host" || a == "-host":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--host requires a value")
+			}
+			hostOverride, i = args[i+1], i+1
+		case strings.HasPrefix(a, "--host="):
+			hostOverride = strings.TrimPrefix(a, "--host=")
+		case a == "-h" || a == "--help" || a == "help":
+			launchUsage()
+			return nil
+		case strings.HasPrefix(a, "-"):
+			return fmt.Errorf("unknown flag %q for launch", a)
+		default:
+			if name != "" {
+				return fmt.Errorf("unexpected argument %q; use '--' to pass extra args to the app", a)
+			}
+			name = a
+		}
+	}
+
+	if name == "" {
+		launchUsage()
+		return nil
+	}
+
+	canonical, ok := launch.Resolve(name)
+	if !ok {
+		return fmt.Errorf("unknown app %q\n\nSupported apps: %s", name, strings.Join(launch.Supported(), ", "))
+	}
+
+	host := config.ConnectableHostFrom(hostOverride)
+
+	if model = strings.TrimSpace(model); model == "" {
+		if models := config.Models(""); len(models) > 0 {
+			model = models[0]
+		}
+	}
+	if model == "" {
+		return fmt.Errorf("no model specified; pass --model <model> (e.g. --model gpt-oss:120b)")
+	}
+
+	warnIfServerUnreachable(host)
+
+	log.Printf("launching %s with model %q via %s", canonical, model, host.String())
+	return launch.Launch(canonical, model, extra, host)
+}
+
+func launchUsage() {
+	fmt.Printf(`ollama-lite launch - start an AI app wired to ollama-lite
+
+Usage:
+    ollama-lite launch <app> [--model MODEL] [--host HOST] [-- EXTRA_ARGS...]
+
+Flags:
+    --model MODEL   Model to use (default: first advertised model)
+    --host HOST     ollama-lite address the app should connect to
+                    (overrides OLLAMA_HOST; e.g. 127.0.0.1:11435)
+
+Supported apps:
+%s
+
+Examples:
+    ollama-lite launch claude
+    ollama-lite launch claude --model gpt-oss:120b
+    ollama-lite launch codex -- --sandbox workspace-write
+
+Note: start the server first with "ollama-lite serve".
+`, "    "+strings.Join(launch.SupportedList(), "\n    "))
+}
+
+// warnIfServerUnreachable prints a hint (but does not fail) when nothing answers
+// at the ollama-lite address the launched app is about to use.
+func warnIfServerUnreachable(host *url.URL) {
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := client.Get(strings.TrimRight(host.String(), "/") + "/api/version")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: no ollama-lite server reachable at %s; start it with 'ollama-lite serve'\n", host.String())
+		return
+	}
+	_ = resp.Body.Close()
 }
 
 func signinCmd(args []string) error {

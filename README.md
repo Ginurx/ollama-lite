@@ -59,6 +59,46 @@ ollama-lite version
 > environment variable. The flag takes precedence and accepts the same forms:
 > `HOST:PORT`, `:PORT`, `HOST`, or `scheme://host:port`.
 
+## Launch an app
+
+`ollama-lite launch <app>` starts a supported AI coding tool **pre-wired to use
+the ollama-lite server as its backend** — it injects the right environment
+variables and/or writes the app's config to point at your server, then runs the
+app.
+
+```sh
+# Start the server, then launch an app against it.
+ollama-lite serve &
+ollama-lite launch claude
+ollama-lite launch claude --model gpt-oss:120b
+ollama-lite launch codex -- --sandbox workspace-write   # args after -- go to the app
+```
+
+- `--model MODEL` — which model the app should use (default: the first advertised
+  model). Both `glm-5.2` and `glm-5.2:cloud` work — the server normalizes the suffix.
+- `--host HOST` — the ollama-lite address the app should connect to (overrides
+  `OLLAMA_HOST`); an unspecified bind like `0.0.0.0` is rewritten to loopback.
+- Anything after `--` is passed to the app unchanged.
+
+| App | Name | How it's configured |
+| --- | --- | --- |
+| Claude Code | `claude` | env (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN=ollama`) |
+| Codex | `codex` | own `--profile` at `~/.codex/ollama-launch.config.toml` + `~/.codex/model.json` |
+| Copilot CLI | `copilot` (`copilot-cli`) | env (`COPILOT_PROVIDER_BASE_URL`) |
+| OpenCode | `opencode` | inline config via `OPENCODE_CONFIG_CONTENT` |
+| Qwen Code | `qwen` | `~/.qwen/settings.json` + env (`OPENAI_BASE_URL`) |
+| Droid | `droid` | `~/.factory/settings.json` |
+| Cline | `cline` | `~/.cline/data/...` |
+| Pool | `pool` | env (`POOLSIDE_STANDALONE_BASE_URL`) — not supported on Windows |
+
+The app must already be installed; if it isn't, launch prints the official
+install command/URL and exits — it never runs an installer. Apps that write a
+config file back up any existing file to a sibling `.ollama-lite.bak` and preserve
+your other (non-Ollama) settings. Codex uses its own `--profile`, so your
+`~/.codex/config.toml` is left untouched.
+
+Run `ollama-lite launch --help` for the current app list.
+
 ## How it works
 
 - **Liveness / listing** (`/`, `/api/version`, `/api/tags`, `/v1/models`) are

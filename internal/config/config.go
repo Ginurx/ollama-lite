@@ -83,6 +83,39 @@ func BindAddressFrom(override string) string {
 	return BindAddress()
 }
 
+// ConnectableHost returns Host() with an unspecified bind address (0.0.0.0, ::)
+// rewritten to a loopback address, so an app launched by `ollama-lite launch`
+// dials a reachable address instead of 0.0.0.0. Mirrors envconfig.ConnectableHost.
+func ConnectableHost() *url.URL {
+	return connectable(Host())
+}
+
+// ConnectableHostFrom returns the connectable host URL, preferring an explicit
+// override (e.g. a --host flag) over the OLLAMA_HOST environment variable.
+func ConnectableHostFrom(override string) *url.URL {
+	if override = strings.TrimSpace(override); override != "" {
+		return connectable(hostURL(override))
+	}
+	return ConnectableHost()
+}
+
+// connectable rewrites an unspecified IP host (0.0.0.0 or ::) to loopback.
+func connectable(u *url.URL) *url.URL {
+	host, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		return u
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		if ip.To4() != nil {
+			host = "127.0.0.1"
+		} else {
+			host = "::1"
+		}
+		u.Host = net.JoinHostPort(host, port)
+	}
+	return u
+}
+
 // CloudBaseURL returns the upstream cloud endpoint, overridable via
 // OLLAMA_CLOUD_BASE_URL (matching the official Ollama env var).
 func CloudBaseURL() string {
