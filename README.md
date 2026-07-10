@@ -23,10 +23,11 @@ with no cgo.
 ## Install
 
 ```sh
-go build -o ollama-lite .
+go build .
 ```
 
-Requires Go 1.24+ (the only dependency is `golang.org/x/crypto`).
+This produces `ollama-lite` (or `ollama-lite.exe` on Windows) in the current
+directory. Requires Go 1.24+ (the only dependency is `golang.org/x/crypto`).
 
 ## Usage
 
