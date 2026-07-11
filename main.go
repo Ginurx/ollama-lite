@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"ollama-lite/internal/config"
 	"ollama-lite/internal/launch"
 	"ollama-lite/internal/server"
+	"ollama-lite/internal/tui"
 )
 
 func main() {
@@ -167,14 +169,29 @@ func launchCmd(args []string) error {
 
 	host := config.ConnectableHostFrom(hostOverride)
 
-	// Resolve the model: explicit --model, else the configured default in
-	// ~/.ollama-lite/config.json (per-app then last_model), else the first
-	// advertised model.
+	// Resolve the model. With an explicit --model we use it as-is. Otherwise, on
+	// an interactive terminal, show a picker over the advertised models with the
+	// saved default (~/.ollama-lite/config.json) pre-selected; when not a
+	// terminal, fall back to the saved default, then the first advertised model.
 	if model = strings.TrimSpace(model); model == "" {
-		model = config.LaunchDefaultModel(canonical)
-	}
-	if model == "" {
-		if models := config.Models(""); len(models) > 0 {
+		def := config.LaunchDefaultModel(canonical)
+		models := config.Models("")
+		if len(models) > 0 && tui.Interactive() {
+			chosen, err := tui.SelectModel(fmt.Sprintf("Select a model for %s:", canonical), models, def)
+			switch {
+			case err == nil:
+				model = chosen
+			case errors.Is(err, tui.ErrCanceled):
+				fmt.Fprintln(os.Stderr, "launch canceled")
+				return nil
+			default:
+				fmt.Fprintf(os.Stderr, "Warning: model picker unavailable: %v\n", err)
+			}
+		}
+		if model == "" {
+			model = def
+		}
+		if model == "" && len(models) > 0 {
 			model = models[0]
 		}
 	}
@@ -201,9 +218,12 @@ Usage:
     ollama-lite launch <app> [--model MODEL] [--host HOST] [-- EXTRA_ARGS...]
 
 Flags:
-    --model MODEL   Model to use. Defaults to the model saved for this app in
-                    ~/.ollama-lite/config.json, else the first advertised model.
-                    Passing --model records it as this app's default.
+    --model MODEL   Model to use. Omit it on a terminal to pick interactively
+                    from the advertised models (the saved default is
+                    pre-selected; Enter reuses it). Non-interactive shells fall
+                    back to the saved default, then the first advertised model.
+                    Passing --model records it as this app's default in
+                    ~/.ollama-lite/config.json.
     --host HOST     ollama-lite address the app should connect to
                     (overrides OLLAMA_HOST; e.g. 127.0.0.1:11435)
 
@@ -212,7 +232,7 @@ Supported apps:
 
 Examples:
     ollama-lite launch claude --model gpt-oss:120b   # sets & remembers the model
-    ollama-lite launch claude                        # reuses the saved model
+    ollama-lite launch claude                        # pick from a list (Enter reuses saved)
     ollama-lite launch codex -- --sandbox workspace-write
 
 Note: start the server first with "ollama-lite serve".

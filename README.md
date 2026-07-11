@@ -71,15 +71,19 @@ app.
 # Start the server, then launch an app against it.
 ollama-lite serve &
 ollama-lite launch claude --model gpt-oss:120b   # sets & remembers the model
-ollama-lite launch claude                        # reuses the saved model
+ollama-lite launch claude                        # pick from a list (Enter reuses saved)
 ollama-lite launch codex -- --sandbox workspace-write   # args after -- go to the app
 ```
 
 - `--model MODEL` — which model the app should use. Both `glm-5.2` and
-  `glm-5.2:cloud` work — the server normalizes the suffix. If omitted, the model is
-  resolved from `~/.ollama-lite/config.json` (this app's saved model, then
-  `last_model`), falling back to the first advertised model. Passing `--model`
-  **records it as this app's default**, so subsequent launches need no `--model`.
+  `glm-5.2:cloud` work — the server normalizes the suffix. **Omit it on a terminal**
+  to pick interactively from an arrow-key list of the advertised models, with your
+  saved default (from `~/.ollama-lite/config.json`) pre-selected — press Enter to
+  reuse it. In a non-interactive shell (piped input, CI) no picker is shown; the
+  model falls back to the saved default, then the first advertised model. Passing
+  `--model` skips the picker and **records it as this app's default**, so later
+  launches can just hit Enter. The picker lists the same models advertised on
+  `/api/tags` — configure them with `--models` or `~/.ollama-lite/models.json`.
 - `--host HOST` — the ollama-lite address the app should connect to (overrides
   `OLLAMA_HOST`); an unspecified bind like `0.0.0.0` is rewritten to loopback.
 - Anything after `--` is passed to the app unchanged.
