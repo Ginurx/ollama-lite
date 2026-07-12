@@ -17,16 +17,6 @@ import (
 // DefaultCloudBaseURL is the upstream Ollama cloud endpoint.
 const DefaultCloudBaseURL = "https://ollama.com"
 
-// builtinModels is the fallback model list advertised on /api/tags when the
-// user has not configured one. These are examples; edit ~/.ollama-lite/models.json
-// or pass --models to change them.
-var builtinModels = []string{
-	"gpt-oss:20b",
-	"gpt-oss:120b",
-	"qwen3-coder:480b",
-	"deepseek-v3.1:671b",
-}
-
 // Host mirrors Ollama's OLLAMA_HOST parsing. Default is http://127.0.0.1:11434.
 func Host() *url.URL {
 	return hostURL(strings.TrimSpace(os.Getenv("OLLAMA_HOST")))
@@ -170,9 +160,7 @@ func Models(flagValue string) []string {
 		return dedupe(models)
 	}
 
-	models := modelsFromOllamaConfig()
-	models = append(models, builtinModels...)
-	return dedupe(models)
+	return dedupe(modelsFromOllamaConfig())
 }
 
 func splitList(s string) []string {

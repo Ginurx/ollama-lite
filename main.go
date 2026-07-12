@@ -169,14 +169,21 @@ func launchCmd(args []string) error {
 
 	host := config.ConnectableHostFrom(hostOverride)
 
-	// Resolve the model. With an explicit --model we use it as-is. Otherwise, on
-	// an interactive terminal, show a picker over the advertised models with the
-	// saved default (~/.ollama-lite/config.json) pre-selected; when not a
-	// terminal, fall back to the saved default, then the first advertised model.
+	// Resolve the model. With an explicit --model we use it as-is. Otherwise,
+	// on an interactive terminal, fetch the advertised models from the running
+	// ollama-lite server's /api/tags and show a picker with the saved default
+	// (~/.ollama-lite/config.json) pre-selected. When not a terminal, fall back
+	// to the saved default, then the first server-advertised model.
 	if model = strings.TrimSpace(model); model == "" {
 		def := config.LaunchDefaultModel(canonical)
-		models := config.Models("")
-		if len(models) > 0 && tui.Interactive() {
+		if tui.Interactive() {
+			models, err := launch.FetchModelsFromServer(host)
+			if err != nil {
+				return fmt.Errorf("couldn't reach ollama-lite server at %s: %w\nstart it with 'ollama-lite serve', or pass --model explicitly", host, err)
+			}
+			if len(models) == 0 {
+				return fmt.Errorf("ollama-lite server at %s advertises no models; configure ~/.ollama-lite/models.json (or pass --models to serve), or pass --model explicitly", host)
+			}
 			chosen, err := tui.SelectModel(fmt.Sprintf("Select a model for %s:", canonical), models, def)
 			switch {
 			case err == nil:
@@ -191,8 +198,10 @@ func launchCmd(args []string) error {
 		if model == "" {
 			model = def
 		}
-		if model == "" && len(models) > 0 {
-			model = models[0]
+		if model == "" {
+			if models, err := launch.FetchModelsFromServer(host); err == nil && len(models) > 0 {
+				model = models[0]
+			}
 		}
 	}
 	if model == "" {
