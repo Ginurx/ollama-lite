@@ -108,6 +108,8 @@ func serveCmd(args []string) error {
 	log.Printf("ollama-lite %s listening on http://%s (cloud: %s)", server.Version, addr, config.CloudBaseURL())
 	if len(list) > 0 {
 		log.Printf("advertising %d model(s) on /api/tags: %s", len(list), strings.Join(list, ", "))
+	} else {
+		log.Printf("advertising recommended cloud models on /api/tags (online, from %s/api/experimental/model-recommendations)", config.CloudBaseURL())
 	}
 
 	return server.Serve(ctx, addr, list)

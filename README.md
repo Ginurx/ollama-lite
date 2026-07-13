@@ -114,8 +114,8 @@ Run `ollama-lite launch --help` for the current app list.
 
 ## How it works
 
-- **Liveness / listing** (`/`, `/api/version`, `/api/tags`, `/v1/models`) are
-  answered locally.
+- **Liveness / listing** (`/`, `/api/version`, `/api/tags`, `/v1/models`,
+  `/api/experimental/model-recommendations`) are answered locally.
 - **Everything else** (`/api/chat`, `/api/generate`, `/api/embed`,
   `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/responses`,
   `/v1/messages`, `/api/me`, …) is signed with your Ed25519 key and
@@ -142,15 +142,20 @@ ollama-lite specific:
 | | Purpose |
 | --- | --- |
 | `--host HOST:PORT` (serve flag) | Address to listen on; overrides `OLLAMA_HOST` |
-| `--models a,b,c` (serve flag) | Models to advertise on `/api/tags` and `/v1/models` |
+| `--models a,b,c` (serve flag) | Models to advertise on `/api/tags` and `/v1/models`; overrides the recommendation list |
 | `~/.ollama-lite/models.json` | JSON array of model names (used when `--models` is unset) |
+| `~/.ollama-lite/cache/model-recommendations.json` | Snapshot of the last online-fetched recommendation list (served offline until a refresh succeeds) |
 | `~/.ollama-lite/config.json` | Per-app launch default model (`integrations.<app>.models` / `last_model`); same structure as `~/.ollama/config.json` |
 | `OLLAMA_LITE_OLLAMA_VERSION` | Version string reported on `/api/version` (default tracks a real Ollama release) |
 
-If neither the flag nor the file is set, the advertised list is seeded from any
-models in your `~/.ollama/config.json` integrations plus a small built-in
-default set. Model listing only affects discovery (UI dropdowns) — you can always
-request any cloud model by exact name.
+If neither the flag nor the file is set, the advertised list comes from
+ollama.com's model recommendations — a built-in cloud-only default list,
+refreshed online (stale-while-revalidate) from
+`{OLLAMA_CLOUD_BASE_URL}/api/experimental/model-recommendations` and cached to
+`~/.ollama-lite/cache/model-recommendations.json`. The richer recommendation
+objects are also served at `GET /api/experimental/model-recommendations`, for
+parity with the official Ollama. Model listing only affects discovery (UI
+dropdowns) — you can always request any cloud model by exact name.
 
 ## What it does *not* do
 

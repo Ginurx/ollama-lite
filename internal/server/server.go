@@ -57,15 +57,41 @@ func reportedOllamaVersion() string {
 // Server serves the Ollama-compatible API.
 type Server struct {
 	models  []string
+	recs    *recommendationsCache
 	origins []*regexp.Regexp
 }
 
-// New builds a Server that advertises the given model list on /api/tags.
-func New(models []string) *Server {
+// New builds a Server that advertises the given model list on /api/tags. When
+// models is empty, /api/tags and /v1/models instead advertise the model
+// recommendation list from recs (built-in defaults refreshed online from
+// ollama.com). recs may be nil, in which case an empty models list advertises
+// nothing.
+func New(models []string, recs *recommendationsCache) *Server {
 	return &Server{
 		models:  models,
+		recs:    recs,
 		origins: compileOrigins(config.AllowedOrigins()),
 	}
+}
+
+// advertisedModels returns the model names to list on /api/tags and /v1/models:
+// the explicitly configured list when non-empty, otherwise the recommendation
+// names (triggering a stale-while-revalidate refresh on read).
+func (s *Server) advertisedModels(ctx context.Context) []string {
+	if len(s.models) > 0 {
+		return s.models
+	}
+	if s.recs == nil {
+		return nil
+	}
+	recs := s.recs.GetSWR(ctx)
+	names := make([]string, 0, len(recs))
+	for _, r := range recs {
+		if r.Model != "" {
+			names = append(names, r.Model)
+		}
+	}
+	return names
 }
 
 // Handler returns the root http.Handler (routes wrapped with CORS handling).
@@ -78,6 +104,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("HEAD /api/version", handleVersion)
 	mux.HandleFunc("GET /api/tags", s.handleTags)
 	mux.HandleFunc("HEAD /api/tags", s.handleTags)
+	mux.HandleFunc("GET /api/experimental/model-recommendations", s.handleRecommendations)
+	mux.HandleFunc("HEAD /api/experimental/model-recommendations", s.handleRecommendations)
 	mux.HandleFunc("GET /v1/models", s.handleV1Models)
 
 	// Everything else is signed and proxied to the cloud.
@@ -123,9 +151,10 @@ type listResponse struct {
 }
 
 func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
+	models := s.advertisedModels(r.Context())
 	now := time.Now().UTC()
-	resp := listResponse{Models: make([]listModelResponse, 0, len(s.models))}
-	for _, m := range s.models {
+	resp := listResponse{Models: make([]listModelResponse, 0, len(models))}
+	for _, m := range models {
 		resp.Models = append(resp.Models, listModelResponse{
 			Name:       m,
 			Model:      m,
@@ -136,6 +165,18 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleRecommendations serves the full recommendation objects (richer than
+// /api/tags) at the same path the official Ollama exposes, for parity.
+func (s *Server) handleRecommendations(w http.ResponseWriter, r *http.Request) {
+	if s.recs == nil {
+		writeJSON(w, http.StatusOK, recommendationsResponse{})
+		return
+	}
+	writeJSON(w, http.StatusOK, recommendationsResponse{
+		Recommendations: s.recs.GetSWR(r.Context()),
+	})
+}
+
 type openAIModel struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -144,9 +185,10 @@ type openAIModel struct {
 }
 
 func (s *Server) handleV1Models(w http.ResponseWriter, r *http.Request) {
+	models := s.advertisedModels(r.Context())
 	created := time.Now().Unix()
-	data := make([]openAIModel, 0, len(s.models))
-	for _, m := range s.models {
+	data := make([]openAIModel, 0, len(models))
+	for _, m := range models {
 		data = append(data, openAIModel{ID: m, Object: "model", Created: created, OwnedBy: "library"})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
@@ -418,11 +460,16 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
-// Serve starts the HTTP server on addr and blocks.
+// Serve starts the HTTP server on addr and blocks. When models is non-empty it
+// is advertised verbatim on /api/tags and /v1/models; otherwise those endpoints
+// advertise the online-refreshed model recommendation list.
 func Serve(ctx context.Context, addr string, models []string) error {
+	recs := newRecommendationsCache()
+	recs.Start(ctx)
+
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: New(models).Handler(),
+		Handler: New(models, recs).Handler(),
 	}
 
 	go func() {

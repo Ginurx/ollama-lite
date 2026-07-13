@@ -144,13 +144,14 @@ func AllowedOrigins() []string {
 	return origins
 }
 
-// Models returns the list of model names advertised on /api/tags and /v1/models.
+// Models returns the explicitly configured list of model names to advertise on
+// /api/tags and /v1/models.
 //
 // Resolution order:
 //  1. the --models flag (comma-separated), if non-empty;
 //  2. ~/.ollama-lite/models.json (a JSON array of strings), if present;
-//  3. models found in ~/.ollama/config.json integrations, merged with a small
-//     built-in default list.
+//  3. empty — in which case the server advertises the online-refreshed model
+//     recommendation list instead (see internal/server/recommendations.go).
 func Models(flagValue string) []string {
 	if flagValue = strings.TrimSpace(flagValue); flagValue != "" {
 		return dedupe(splitList(flagValue))
@@ -160,7 +161,7 @@ func Models(flagValue string) []string {
 		return dedupe(models)
 	}
 
-	return dedupe(modelsFromOllamaConfig())
+	return nil
 }
 
 func splitList(s string) []string {
@@ -196,34 +197,6 @@ func modelsFromFile() ([]string, bool) {
 		return nil, false
 	}
 	return models, len(models) > 0
-}
-
-// modelsFromOllamaConfig reads any model names configured under
-// "integrations.*.models" in the official ~/.ollama/config.json.
-func modelsFromOllamaConfig() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(home, ".ollama", "config.json"))
-	if err != nil {
-		return nil
-	}
-
-	var cfg struct {
-		Integrations map[string]struct {
-			Models []string `json:"models"`
-		} `json:"integrations"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil
-	}
-
-	var models []string
-	for _, integration := range cfg.Integrations {
-		models = append(models, integration.Models...)
-	}
-	return models
 }
 
 func dedupe(in []string) []string {
