@@ -1,14 +1,24 @@
 package launch
 
 import (
+	"encoding/json"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // claude configures Claude Code to use ollama-lite via environment variables.
-// Mirrors D:\repo10\ollama\cmd\launch\claude.go (minus cloud-limit enrichment).
+// Mirrors D:\repo10\ollama\cmd\launch\claude.go, including the cloud-limit
+// enrichment: for cloud models, CLAUDE_CODE_AUTO_COMPACT_WINDOW is set to the
+// model's context length so auto-compact triggers near the real limit instead
+// of Claude Code's smaller default. The limit is fetched over HTTP from the
+// running server's /api/experimental/model-recommendations (ollama-lite's model
+// list is dynamic, so a static table like ollama's would drift).
 type claude struct{}
 
 func (c *claude) Display() string { return "Claude Code" }
@@ -49,6 +59,50 @@ func (c *claude) Prepare(model string, host *url.URL, extra []string) (args, env
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL=" + model,
 		"CLAUDE_CODE_SUBAGENT_MODEL=" + model,
 	}
+	if isCloudModelName(model) {
+		if w, ok := fetchContextWindow(host, model); ok {
+			env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(w))
+		}
+	}
 	args = append([]string{"--model", model}, extra...)
 	return args, env, nil
+}
+
+// isCloudModelName reports whether model is an explicit cloud model, mirroring
+// internal/server.isCloudRecommendation. Used to gate the auto-compact-window
+// enrichment the same way ollama's cmd/launch gates it with isCloudModelName.
+func isCloudModelName(model string) bool {
+	return strings.HasSuffix(model, ":cloud") || strings.HasSuffix(model, "-cloud")
+}
+
+// fetchContextWindow looks up the model's context length from the running
+// ollama-lite server's /api/experimental/model-recommendations. It is
+// best-effort: any transport error, non-200 response, decode failure, missing
+// entry, or zero context length returns (0, false) and the caller simply omits
+// the env var (Claude Code then keeps its default), matching ollama's "if ok".
+func fetchContextWindow(host *url.URL, model string) (int, bool) {
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := client.Get(strings.TrimRight(host.String(), "/") + "/api/experimental/model-recommendations")
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, false
+	}
+	var out struct {
+		Recommendations []struct {
+			Model         string `json:"model"`
+			ContextLength int    `json:"context_length"`
+		} `json:"recommendations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, false
+	}
+	for _, r := range out.Recommendations {
+		if r.Model == model && r.ContextLength > 0 {
+			return r.ContextLength, true
+		}
+	}
+	return 0, false
 }

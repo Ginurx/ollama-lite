@@ -2,6 +2,9 @@ package launch
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -22,6 +25,15 @@ func envMap(env []string) map[string]string {
 		m[k] = v
 	}
 	return m
+}
+
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
 }
 
 // setHome points os.UserHomeDir at a temp dir on both Unix and Windows.
@@ -63,8 +75,58 @@ func TestClaudePrepare(t *testing.T) {
 	if m["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "gpt-oss:120b" || m["CLAUDE_CODE_SUBAGENT_MODEL"] != "gpt-oss:120b" {
 		t.Error("model env vars not set")
 	}
+	if _, ok := m["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; ok {
+		t.Error("CLAUDE_CODE_AUTO_COMPACT_WINDOW should be absent for non-cloud models")
+	}
 	if !slices.Equal(args, []string{"--model", "gpt-oss:120b", "--resume"}) {
 		t.Errorf("args = %v", args)
+	}
+}
+
+// TestClaudePrepareCloudAutoCompact asserts that for a cloud model the
+// CLAUDE_CODE_AUTO_COMPACT_WINDOW env var is enriched from the running server's
+// /api/experimental/model-recommendations.
+func TestClaudePrepareCloudAutoCompact(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/experimental/model-recommendations" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"recommendations":[
+			{"model":"gpt-oss:120b","context_length":131072},
+			{"model":"glm-5.2:cloud","context_length":202752}
+		]}`)
+	}))
+	defer srv.Close()
+
+	host := mustURL(t, srv.URL)
+	args, env, err := (&claude{}).Prepare("glm-5.2:cloud", host, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := envMap(env)
+	if m["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] != "202752" {
+		t.Errorf("CLAUDE_CODE_AUTO_COMPACT_WINDOW = %q, want 202752", m["CLAUDE_CODE_AUTO_COMPACT_WINDOW"])
+	}
+	if m["ANTHROPIC_DEFAULT_OPUS_MODEL"] != "glm-5.2:cloud" {
+		t.Errorf("OPUS model = %q", m["ANTHROPIC_DEFAULT_OPUS_MODEL"])
+	}
+	if !slices.Equal(args, []string{"--model", "glm-5.2:cloud"}) {
+		t.Errorf("args = %v", args)
+	}
+}
+
+// TestClaudePrepareCloudNoServer asserts the launch is not broken when the
+// server is unreachable: the auto-compact window is omitted and Prepare succeeds.
+func TestClaudePrepareCloudNoServer(t *testing.T) {
+	host := &url.URL{Scheme: "http", Host: "127.0.0.1:1"} // nothing listening
+	_, env, err := (&claude{}).Prepare("kimi-k2.6:cloud", host, nil)
+	if err != nil {
+		t.Fatalf("Prepare should succeed even when server is down: %v", err)
+	}
+	if _, ok := envMap(env)["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; ok {
+		t.Error("CLAUDE_CODE_AUTO_COMPACT_WINDOW should be absent when server is unreachable")
 	}
 }
 
