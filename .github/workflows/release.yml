@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux_amd64
+            archive: tar.gz
+          - goos: linux
+            goarch: arm64
+            suffix: linux_arm64
+            archive: tar.gz
+          - goos: linux
+            goarch: arm
+            goarm: '7'
+            suffix: linux_armv7
+            archive: tar.gz
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin_amd64
+            archive: tar.gz
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin_arm64
+            archive: tar.gz
+          - goos: windows
+            goarch: amd64
+            suffix: windows_amd64
+            archive: zip
+          - goos: windows
+            goarch: arm64
+            suffix: windows_arm64
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+
+      - name: Build archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          TARGET="ollama-lite_${VERSION}_${{ matrix.suffix }}"
+          STAGING="dist/${TARGET}"
+          BINARY="ollama-lite"
+          GOARM_VALUE="${{ matrix.goarm }}"
+
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY="${BINARY}.exe"
+          fi
+
+          mkdir -p "${STAGING}"
+
+          CGO_ENABLED=0 GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" GOARM="${GOARM_VALUE}" \
+            go build \
+              -trimpath \
+              -ldflags "-s -w -X ollama-lite/internal/server.Version=${VERSION}" \
+              -o "${STAGING}/${BINARY}" \
+              .
+
+          cp README.md LICENSE "${STAGING}/"
+
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd dist && zip -r "${TARGET}.zip" "${TARGET}")
+          else
+            (cd dist && tar -czf "${TARGET}.tar.gz" "${TARGET}")
+          fi
+
+          rm -rf "${STAGING}"
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-lite-${{ matrix.suffix }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: release
+
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*

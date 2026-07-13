@@ -24,7 +24,7 @@ import (
 )
 
 // Version is ollama-lite's own version.
-const Version = "0.1.0"
+var Version = "dev"
 
 // defaultOllamaVersion is reported on /api/version and sent as the client
 // version header. It tracks a real Ollama release so clients enable the full
