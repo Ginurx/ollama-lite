@@ -129,6 +129,18 @@ func connectable(u *url.URL) bool {
 	return true
 }
 
+// APIKey returns the shared secret that gates the server (serve) and authenticates
+// launched apps (launch), preferring an explicit --api-key flag over the
+// OLLAMA_LITE_API_KEY environment variable. An empty result means "no auth" on the
+// server side and "use the default ollama key" on the launch side, preserving the
+// pre-flag behavior.
+func APIKey(override string) string {
+	if v := strings.TrimSpace(override); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("OLLAMA_LITE_API_KEY"))
+}
+
 // CloudBaseURL returns the upstream cloud endpoint, overridable via
 // OLLAMA_CLOUD_BASE_URL (matching the official Ollama env var).
 func CloudBaseURL() string {

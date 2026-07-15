@@ -20,7 +20,7 @@ func TestFetchModelsFromServer(t *testing.T) {
 	defer srv.Close()
 
 	host, _ := url.Parse(srv.URL)
-	got, err := FetchModelsFromServer(host)
+	got, err := FetchModelsFromServer(host, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestFetchModelsFromServerEmpty(t *testing.T) {
 	defer srv.Close()
 
 	host, _ := url.Parse(srv.URL)
-	got, err := FetchModelsFromServer(host)
+	got, err := FetchModelsFromServer(host, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestFetchModelsFromServerNon200(t *testing.T) {
 	defer srv.Close()
 
 	host, _ := url.Parse(srv.URL)
-	if _, err := FetchModelsFromServer(host); err == nil {
+	if _, err := FetchModelsFromServer(host, ""); err == nil {
 		t.Fatal("want error on non-200, got nil")
 	}
 }
@@ -62,7 +62,7 @@ func TestFetchModelsFromServerNon200(t *testing.T) {
 func TestFetchModelsFromServerUnreachable(t *testing.T) {
 	// Port 1 is reserved/blocked on most systems, so connecting should fail fast.
 	host, _ := url.Parse("http://127.0.0.1:1")
-	if _, err := FetchModelsFromServer(host); err == nil {
+	if _, err := FetchModelsFromServer(host, ""); err == nil {
 		t.Fatal("want error on unreachable server, got nil")
 	}
 }
@@ -78,7 +78,7 @@ func TestFetchModelsFromServerTrimsTrailingSlash(t *testing.T) {
 	defer srv.Close()
 
 	host, _ := url.Parse(srv.URL + "/")
-	if _, err := FetchModelsFromServer(host); err != nil {
+	if _, err := FetchModelsFromServer(host, ""); err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if seenPath != "/api/tags" {
@@ -103,8 +103,39 @@ func TestFetchModelsFromServerTimeout(t *testing.T) {
 	// Use a 1ms-timeout variant by temporarily wrapping: the production helper
 	// uses 1500ms which is too long for a unit test, so just verify the helper
 	// returns at all (it will succeed here since 300ms < 1500ms).
-	_, _ = FetchModelsFromServer(host)
+	_, _ = FetchModelsFromServer(host, "")
 	if time.Since(start) > 2*time.Second {
 		t.Fatal("helper blocked too long")
+	}
+}
+
+// TestFetchModelsFromServerSendsBearer asserts that when an API key is provided it
+// is sent as "Authorization: Bearer <key>", so the picker reaches an auth-gated
+// server, and that an empty key sends no Authorization header.
+func TestFetchModelsFromServerSendsBearer(t *testing.T) {
+	var seenAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"models":[]}`))
+	}))
+	defer srv.Close()
+
+	host, _ := url.Parse(srv.URL)
+
+	seenAuth = ""
+	if _, err := FetchModelsFromServer(host, "s3cret"); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if seenAuth != "Bearer s3cret" {
+		t.Errorf("Authorization = %q, want Bearer s3cret", seenAuth)
+	}
+
+	seenAuth = ""
+	if _, err := FetchModelsFromServer(host, ""); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if seenAuth != "" {
+		t.Errorf("Authorization = %q, want empty when no key", seenAuth)
 	}
 }

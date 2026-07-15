@@ -28,10 +28,10 @@ func (c *copilot) FindBin() (string, bool) {
 	return "", false
 }
 
-func (c *copilot) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
+func (c *copilot) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
 	env = []string{
 		"COPILOT_PROVIDER_BASE_URL=" + hostV1(host),
-		"COPILOT_PROVIDER_API_KEY=",
+		"COPILOT_PROVIDER_API_KEY=" + effectiveAPIKey(apiKey),
 		"COPILOT_PROVIDER_WIRE_API=responses",
 		"COPILOT_MODEL=" + model,
 	}

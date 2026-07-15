@@ -89,6 +89,11 @@ ollama-lite launch codex -- --sandbox workspace-write   # args after -- go to th
   rewritten to loopback so the app dials a reachable address, and a warning is
   printed naming the original value; for a remote server, pass its reachable IP
   (e.g. `192.168.1.10:11434`) instead.
+- `--api-key KEY` — shared secret the app sends as `Authorization: Bearer KEY`. Pass
+  the **same** key to `serve` and `launch` so the app authenticates against an
+  auth-enabled server (or set `OLLAMA_LITE_API_KEY` once for both). Omit it on both
+  for the default open behavior; with no key, the value written into apps is the
+  historical literal `ollama`.
 - Anything after `--` is passed to the app unchanged.
 
 The launch default lives in `~/.ollama-lite/config.json`, which uses the **same
@@ -107,6 +112,9 @@ ollama-lite's own file; the official `~/.ollama/config.json` is never modified.
 | Cline | `cline` | `~/.cline/data/...` |
 | Pool | `pool` | env (`POOLSIDE_STANDALONE_BASE_URL`) — not supported on Windows |
 
+The `ollama` key shown in the table is the default; it becomes whatever
+`--api-key` / `OLLAMA_LITE_API_KEY` is set to (see [LAN / shared-secret](#lan--shared-secret-weak-encryption)).
+
 The app must already be installed; if it isn't, launch prints the official
 install command/URL and exits — it never runs an installer. Apps that write a
 config file back up any existing file to a sibling `.ollama-lite.bak` and preserve
@@ -114,6 +122,26 @@ your other (non-Ollama) settings. Codex uses its own `--profile`, so your
 `~/.codex/config.toml` is left untouched.
 
 Run `ollama-lite launch --help` for the current app list.
+
+### LAN / shared-secret (weak encryption)
+
+By default the server is open (it binds to loopback). To expose it on a LAN
+without letting anyone on the network drive it — and spend your ollama.com
+quota — set a shared secret with `--api-key` (or `OLLAMA_LITE_API_KEY`). When a
+key is set, `serve` rejects every request whose `Authorization: Bearer <key>`
+doesn't match; pass the same key to `launch` so the app authenticates:
+
+```sh
+# On the host running the models:
+ollama-lite serve --host 0.0.0.0:11434 --api-key s3cret
+
+# On any LAN machine (or the same one):
+ollama-lite launch claude --host 192.168.1.10:11434 --api-key s3cret --model gpt-oss:120b
+```
+
+Unset on both = open server as before. This is a bearer-token gate (a shared
+secret over plain HTTP), fine for keeping casual LAN neighbors off your account —
+not a substitute for TLS if you need confidentiality.
 
 ## How it works
 
@@ -146,9 +174,11 @@ ollama-lite specific:
 | --- | --- |
 | `--host HOST:PORT` (serve flag) | Address to listen on; overrides `OLLAMA_HOST` |
 | `--models a,b,c` (serve flag) | Models to advertise on `/api/tags` and `/v1/models`; overrides the recommendation list |
+| `--api-key KEY` (serve & launch flag) | Shared secret gating the server (`serve`) and authenticating the launched app (`launch`); overrides `OLLAMA_LITE_API_KEY`. Unset = open server / default `ollama` key |
 | `~/.ollama-lite/models.json` | JSON array of model names (used when `--models` is unset) |
 | `~/.ollama-lite/cache/model-recommendations.json` | Snapshot of the last online-fetched recommendation list (served offline until a refresh succeeds) |
 | `~/.ollama-lite/config.json` | Per-app launch default model (`integrations.<app>.models` / `last_model`); same structure as `~/.ollama/config.json` |
+| `OLLAMA_LITE_API_KEY` | Shared secret used by both `serve` (gates the server) and `launch` (sent as `Authorization: Bearer <key>`); overridden by `--api-key` |
 | `OLLAMA_LITE_OLLAMA_VERSION` | Version string reported on `/api/version` (default tracks a real Ollama release) |
 
 If neither the flag nor the file is set, the advertised list comes from

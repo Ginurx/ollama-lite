@@ -31,7 +31,7 @@ func (c *codex) Display() string { return "Codex" }
 
 func (c *codex) FindBin() (string, bool) { return lookInstalled("codex") }
 
-func (c *codex) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
+func (c *codex) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
 	if err := checkCodexVersion(); err != nil {
 		return nil, nil, err
 	}
@@ -61,7 +61,7 @@ func (c *codex) Prepare(model string, host *url.URL, extra []string) (args, env 
 	args = append(args, "-m", model)
 	args = append(args, extra...)
 
-	env = []string{"OPENAI_API_KEY=ollama"}
+	env = []string{"OPENAI_API_KEY=" + effectiveAPIKey(apiKey)}
 	return args, env, nil
 }
 

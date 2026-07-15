@@ -31,8 +31,8 @@ func (o *opencode) FindBin() (string, bool) {
 	return "", false
 }
 
-func (o *opencode) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
-	content, err := opencodeConfig(model, host)
+func (o *opencode) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
+	content, err := opencodeConfig(model, host, apiKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -42,7 +42,7 @@ func (o *opencode) Prepare(model string, host *url.URL, extra []string) (args, e
 }
 
 // opencodeConfig builds the inline JSON for OPENCODE_CONFIG_CONTENT.
-func opencodeConfig(model string, host *url.URL) (string, error) {
+func opencodeConfig(model string, host *url.URL, apiKey string) (string, error) {
 	config := map[string]any{
 		"$schema": "https://opencode.ai/config.json",
 		"provider": map[string]any{
@@ -51,6 +51,7 @@ func opencodeConfig(model string, host *url.URL) (string, error) {
 				"name": "Ollama",
 				"options": map[string]any{
 					"baseURL": hostV1(host),
+					"apiKey":  effectiveAPIKey(apiKey),
 				},
 				"models": map[string]any{
 					model: map[string]any{"name": model},

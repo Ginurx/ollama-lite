@@ -40,7 +40,7 @@ func TestServeAdvertisesOnlineRecommendations(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = Serve(ctx, addr, nil) }()
+	go func() { _ = Serve(ctx, addr, nil, "") }()
 
 	base := "http://" + addr
 	check := func() []string {
@@ -121,7 +121,7 @@ func TestServeConfiguredModelsOverride(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() { _ = Serve(ctx, addr, []string{"gpt-oss:120b"}) }()
+	go func() { _ = Serve(ctx, addr, []string{"gpt-oss:120b"}, "") }()
 
 	base := "http://" + addr
 	var names []string

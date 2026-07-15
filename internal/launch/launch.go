@@ -26,7 +26,10 @@ type App interface {
 	// Prepare writes any config files the app needs and returns the complete
 	// argument vector (app-specific flags composed with the user's pass-through
 	// extra args) plus any extra environment variables (KEY=VALUE) to set.
-	Prepare(model string, host *url.URL, extra []string) (args, env []string, err error)
+	// apiKey is the shared secret resolved from --api-key / OLLAMA_LITE_API_KEY
+	// (empty when unset); apps that always send a key should pass it through
+	// effectiveAPIKey, which falls back to "ollama".
+	Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error)
 }
 
 // spec is a registry entry describing one supported app.
@@ -91,8 +94,10 @@ func SupportedList() []string {
 }
 
 // Launch configures the named app to use host as its backend and execs it,
-// passing model plus any extra pass-through args.
-func Launch(name, model string, extra []string, host *url.URL) error {
+// passing model plus any extra pass-through args. apiKey is the shared secret
+// (empty when unset) written into the app so it authenticates against an
+// auth-enabled server.
+func Launch(name, model string, extra []string, host *url.URL, apiKey string) error {
 	s, ok := lookup(name)
 	if !ok {
 		return fmt.Errorf("unknown app %q\n\nSupported apps: %s", name, strings.Join(Supported(), ", "))
@@ -109,7 +114,7 @@ func Launch(name, model string, extra []string, host *url.URL) error {
 		return fmt.Errorf("%s is not installed, %s", s.name, s.installHint)
 	}
 
-	args, env, err := s.app.Prepare(model, host, extra)
+	args, env, err := s.app.Prepare(model, host, extra, apiKey)
 	if err != nil {
 		return err
 	}
@@ -131,4 +136,14 @@ func hostRoot(host *url.URL) string {
 // hostV1 returns the OpenAI-compatible base, e.g. "http://127.0.0.1:11434/v1".
 func hostV1(host *url.URL) string {
 	return hostRoot(host) + "/v1"
+}
+
+// effectiveAPIKey returns the API key an app should send: the resolved key when one
+// was provided (--api-key / OLLAMA_LITE_API_KEY), or the historical literal
+// "ollama" when unset, preserving the pre-flag behavior against an open server.
+func effectiveAPIKey(apiKey string) string {
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		return apiKey
+	}
+	return "ollama"
 }

@@ -58,7 +58,7 @@ func TestLookupAndAliases(t *testing.T) {
 }
 
 func TestClaudePrepare(t *testing.T) {
-	args, env, err := (&claude{}).Prepare("gpt-oss:120b", testHost(), []string{"--resume"})
+	args, env, err := (&claude{}).Prepare("gpt-oss:120b", testHost(), []string{"--resume"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestClaudePrepareCloudAutoCompact(t *testing.T) {
 	defer srv.Close()
 
 	host := mustURL(t, srv.URL)
-	args, env, err := (&claude{}).Prepare("glm-5.2:cloud", host, nil)
+	args, env, err := (&claude{}).Prepare("glm-5.2:cloud", host, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestClaudePrepareCloudAutoCompact(t *testing.T) {
 // server is unreachable: the auto-compact window is omitted and Prepare succeeds.
 func TestClaudePrepareCloudNoServer(t *testing.T) {
 	host := &url.URL{Scheme: "http", Host: "127.0.0.1:1"} // nothing listening
-	_, env, err := (&claude{}).Prepare("kimi-k2.6:cloud", host, nil)
+	_, env, err := (&claude{}).Prepare("kimi-k2.6:cloud", host, nil, "")
 	if err != nil {
 		t.Fatalf("Prepare should succeed even when server is down: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestClaudePrepareCloudNoServer(t *testing.T) {
 }
 
 func TestCopilotPrepare(t *testing.T) {
-	args, env, err := (&copilot{}).Prepare("m", testHost(), nil)
+	args, env, err := (&copilot{}).Prepare("m", testHost(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestCopilotPrepare(t *testing.T) {
 }
 
 func TestPoolPrepare(t *testing.T) {
-	args, env, err := (&pool{}).Prepare("m", testHost(), nil)
+	args, env, err := (&pool{}).Prepare("m", testHost(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestPoolUnsupportedMatchesPlatform(t *testing.T) {
 }
 
 func TestOpenCodePrepare(t *testing.T) {
-	_, env, err := (&opencode{}).Prepare("gpt-oss:120b", testHost(), nil)
+	_, env, err := (&opencode{}).Prepare("gpt-oss:120b", testHost(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestQwenPrepareMergesConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	args, env, err := (&qwen{}).Prepare("gpt-oss:120b", testHost(), nil)
+	args, env, err := (&qwen{}).Prepare("gpt-oss:120b", testHost(), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestDroidPreparePreservesOtherModels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := (&droid{}).Prepare("gpt-oss:120b", testHost(), nil); err != nil {
+	if _, _, err := (&droid{}).Prepare("gpt-oss:120b", testHost(), nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -344,7 +344,7 @@ func TestDroidPreparePreservesOtherModels(t *testing.T) {
 
 func TestClinePrepareWritesConfigs(t *testing.T) {
 	home := setHome(t)
-	if _, _, err := (&cline{}).Prepare("gpt-oss:120b", testHost(), nil); err != nil {
+	if _, _, err := (&cline{}).Prepare("gpt-oss:120b", testHost(), nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -377,5 +377,134 @@ func TestWriteWithBackup(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(path + ".ollama-lite.bak"); string(b) != "v1" {
 		t.Errorf("backup = %q", b)
+	}
+}
+
+// TestEffectiveAPIKey checks the fallback to the historical "ollama" literal when
+// no key is configured, and the passthrough when one is.
+func TestEffectiveAPIKey(t *testing.T) {
+	if got := effectiveAPIKey(""); got != "ollama" {
+		t.Errorf("effectiveAPIKey(\"\") = %q, want ollama", got)
+	}
+	if got := effectiveAPIKey("  "); got != "ollama" {
+		t.Errorf("effectiveAPIKey(\"  \") = %q, want ollama", got)
+	}
+	if got := effectiveAPIKey("s3cret"); got != "s3cret" {
+		t.Errorf("effectiveAPIKey(\"s3cret\") = %q, want s3cret", got)
+	}
+}
+
+// TestPrepareCustomAPIKey asserts a custom --api-key threads through each app
+// that writes a key into the target app, replacing the default "ollama" literal.
+func TestPrepareCustomAPIKey(t *testing.T) {
+	host := testHost()
+
+	_, env, err := (&claude{}).Prepare("m", host, nil, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := envMap(env); m["ANTHROPIC_AUTH_TOKEN"] != "s3cret" {
+		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q, want s3cret", m["ANTHROPIC_AUTH_TOKEN"])
+	}
+
+	_, env, err = (&copilot{}).Prepare("m", host, nil, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := envMap(env); m["COPILOT_PROVIDER_API_KEY"] != "s3cret" {
+		t.Errorf("COPILOT_PROVIDER_API_KEY = %q, want s3cret", m["COPILOT_PROVIDER_API_KEY"])
+	}
+
+	_, env, err = (&pool{}).Prepare("m", host, nil, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := envMap(env); m["POOLSIDE_API_KEY"] != "s3cret" {
+		t.Errorf("POOLSIDE_API_KEY = %q, want s3cret", m["POOLSIDE_API_KEY"])
+	}
+
+	_, env, err = (&opencode{}).Prepare("m", host, nil, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(envMap(env)["OPENCODE_CONFIG_CONTENT"]), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg["provider"].(map[string]any)["ollama"].(map[string]any)["options"].(map[string]any)["apiKey"]
+	if got != "s3cret" {
+		t.Errorf("opencode apiKey = %v, want s3cret", got)
+	}
+}
+
+// TestQwenCustomAPIKey asserts the key flows into both the OpenAI env var and the
+// settings.json env block written for Qwen.
+func TestQwenCustomAPIKey(t *testing.T) {
+	home := setHome(t)
+	_, env, err := (&qwen{}).Prepare("gpt-oss:120b", testHost(), nil, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := envMap(env); m["OPENAI_API_KEY"] != "s3cret" {
+		t.Errorf("OPENAI_API_KEY = %q, want s3cret", m["OPENAI_API_KEY"])
+	}
+	cfg, _ := readJSONMap(filepath.Join(home, ".qwen", "settings.json"))
+	if asMap(cfg["env"])["OLLAMA_API_KEY"] != "s3cret" {
+		t.Errorf("env.OLLAMA_API_KEY = %v, want s3cret", asMap(cfg["env"])["OLLAMA_API_KEY"])
+	}
+}
+
+// TestDroidCustomAPIKeyReplacesPriorEntry asserts that with a custom key a prior
+// ollama-lite entry (which now carries the custom key, not "ollama") is replaced
+// rather than duplicated, and the new entry carries the custom key.
+func TestDroidCustomAPIKeyReplacesPriorEntry(t *testing.T) {
+	home := setHome(t)
+	configPath := filepath.Join(home, ".factory", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A prior ollama-lite launch pointing at the same base URL with the custom key.
+	seed := `{"customModels":[{"model":"old","baseUrl":"http://127.0.0.1:11434/v1","apiKey":"s3cret"}]}`
+	if err := os.WriteFile(configPath, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := (&droid{}).Prepare("gpt-oss:120b", testHost(), nil, "s3cret"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _ := readJSONMap(configPath)
+	models := cfg["customModels"].([]any)
+	if len(models) != 1 {
+		t.Fatalf("expected the prior same-baseUrl entry to be replaced, got %d entries: %v", len(models), models)
+	}
+	first := models[0].(map[string]any)
+	if first["apiKey"] != "s3cret" || first["model"] != "gpt-oss:120b" {
+		t.Errorf("ollama model entry = %v", first)
+	}
+}
+
+// TestClineCustomAPIKey asserts cline writes the key when provided and omits it
+// (preserving the old delete behavior) when not.
+func TestClineCustomAPIKey(t *testing.T) {
+	home := setHome(t)
+	if _, _, err := (&cline{}).Prepare("gpt-oss:120b", testHost(), nil, "s3cret"); err != nil {
+		t.Fatal(err)
+	}
+	providers, _ := readJSONMap(filepath.Join(home, ".cline", "data", "settings", "providers.json"))
+	settings := asMap(asMap(asMap(providers["providers"])["ollama"])["settings"])
+	if settings["apiKey"] != "s3cret" {
+		t.Errorf("cline apiKey = %v, want s3cret", settings["apiKey"])
+	}
+
+	// Without a key, apiKey must be absent (the pre-flag delete behavior).
+	home2 := setHome(t) // resets HOME to a fresh temp dir
+	if _, _, err := (&cline{}).Prepare("gpt-oss:120b", testHost(), nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	providers2, _ := readJSONMap(filepath.Join(home2, ".cline", "data", "settings", "providers.json"))
+	settings2 := asMap(asMap(asMap(providers2["providers"])["ollama"])["settings"])
+	if _, ok := settings2["apiKey"]; ok {
+		t.Errorf("cline apiKey should be absent when no key set, got %v", settings2["apiKey"])
 	}
 }

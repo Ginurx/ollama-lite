@@ -43,11 +43,11 @@ func (c *claude) FindBin() (string, bool) {
 	return "", false
 }
 
-func (c *claude) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
+func (c *claude) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
 	env = []string{
 		"ANTHROPIC_BASE_URL=" + host.String(),
 		"ANTHROPIC_API_KEY=",
-		"ANTHROPIC_AUTH_TOKEN=ollama",
+		"ANTHROPIC_AUTH_TOKEN=" + effectiveAPIKey(apiKey),
 		"CLAUDE_CODE_ATTRIBUTION_HEADER=0",
 		"DISABLE_TELEMETRY=1",
 		"DISABLE_ERROR_REPORTING=1",

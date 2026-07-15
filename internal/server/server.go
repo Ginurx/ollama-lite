@@ -7,6 +7,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,6 +60,7 @@ type Server struct {
 	models  []string
 	recs    *recommendationsCache
 	origins []*regexp.Regexp
+	apiKey  string // non-empty gates every route behind a bearer-token check
 }
 
 // New builds a Server that advertises the given model list on /api/tags. When
@@ -111,7 +113,7 @@ func (s *Server) Handler() http.Handler {
 	// Everything else is signed and proxied to the cloud.
 	mux.HandleFunc("/", s.handleProxy)
 
-	return s.withCORS(mux)
+	return s.withCORS(s.withAPIKey(mux))
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -460,16 +462,58 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
+// withAPIKey gates every route behind a shared-secret bearer token when s.apiKey
+// is set. It accepts either "Authorization: Bearer <key>" (the OpenAI-compatible
+// form the launched apps send) or a bare "Authorization: <key>". When s.apiKey is
+// empty it is a no-op, preserving the open-server behavior. The check runs before
+// handleProxy, which still strips the client's Authorization and re-signs for the
+// cloud, so this only governs inbound access — the outbound signature is unchanged.
+func (s *Server) withAPIKey(next http.Handler) http.Handler {
+	if s.apiKey == "" {
+		return next
+	}
+	expected := []byte(s.apiKey)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if token := bearerToken(r); subtle.ConstantTimeCompare([]byte(token), expected) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// bearerToken extracts the secret from the Authorization header, accepting both
+// "Bearer <key>" and a bare "<key>". Returns "" when absent or malformed.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if h == "" {
+		return ""
+	}
+	if token, ok := strings.CutPrefix(h, "Bearer "); ok {
+		return strings.TrimSpace(token)
+	}
+	if token, ok := strings.CutPrefix(h, "bearer "); ok {
+		return strings.TrimSpace(token)
+	}
+	return strings.TrimSpace(h)
+}
+
 // Serve starts the HTTP server on addr and blocks. When models is non-empty it
 // is advertised verbatim on /api/tags and /v1/models; otherwise those endpoints
-// advertise the online-refreshed model recommendation list.
-func Serve(ctx context.Context, addr string, models []string) error {
+// advertise the online-refreshed model recommendation list. When apiKey is
+// non-empty, every route is gated behind a matching Authorization: Bearer <key>
+// (or bare Authorization: <key>) check — for shared-secret "weak encryption" on a
+// LAN. An empty apiKey leaves the server open, matching the pre-flag behavior.
+func Serve(ctx context.Context, addr string, models []string, apiKey string) error {
 	recs := newRecommendationsCache()
 	recs.Start(ctx)
 
+	s := New(models, recs)
+	s.apiKey = apiKey
+
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: New(models, recs).Handler(),
+		Handler: s.Handler(),
 	}
 
 	go func() {

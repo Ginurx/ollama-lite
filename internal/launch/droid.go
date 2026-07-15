@@ -3,6 +3,7 @@ package launch
 import (
 	"net/url"
 	"path/filepath"
+	"strings"
 )
 
 // droid configures Factory's Droid CLI by writing ~/.factory/settings.json.
@@ -13,7 +14,7 @@ func (d *droid) Display() string { return "Droid" }
 
 func (d *droid) FindBin() (string, bool) { return lookInstalled("droid") }
 
-func (d *droid) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
+func (d *droid) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
 	home, err := homeDir()
 	if err != nil {
 		return nil, nil, err
@@ -25,7 +26,7 @@ func (d *droid) Prepare(model string, host *url.URL, extra []string) (args, env 
 		return nil, nil, err
 	}
 
-	updateDroidSettings(settings, model, host)
+	updateDroidSettings(settings, model, host, apiKey)
 
 	if err := writeJSON(settingsPath, settings); err != nil {
 		return nil, nil, err
@@ -36,14 +37,22 @@ func (d *droid) Prepare(model string, host *url.URL, extra []string) (args, env 
 
 // updateDroidSettings rewrites the Ollama custom model in place, preserving any
 // non-Ollama custom models and unknown fields.
-func updateDroidSettings(settings map[string]any, model string, host *url.URL) {
-	// Keep only non-Ollama models from the raw list (preserving extra fields).
+func updateDroidSettings(settings map[string]any, model string, host *url.URL, apiKey string) {
+	// Keep only custom models pointing at a different base URL (preserving extra
+	// fields). Identifying "ours" by baseUrl rather than apiKey avoids dropping or
+	// duplicating a prior ollama-lite entry once a custom key is in use.
+	baseURL := hostV1(host)
 	var nonOllama []any
 	if raw, ok := settings["customModels"].([]any); ok {
 		for _, entry := range raw {
-			if m, ok := entry.(map[string]any); ok && m["apiKey"] != "ollama" {
-				nonOllama = append(nonOllama, entry)
+			m, ok := entry.(map[string]any)
+			if !ok {
+				continue
 			}
+			if u, _ := m["baseUrl"].(string); strings.TrimRight(u, "/") == strings.TrimRight(baseURL, "/") {
+				continue
+			}
+			nonOllama = append(nonOllama, entry)
 		}
 	}
 
@@ -51,8 +60,8 @@ func updateDroidSettings(settings map[string]any, model string, host *url.URL) {
 	ollamaModel := map[string]any{
 		"model":           model,
 		"displayName":     model,
-		"baseUrl":         hostV1(host),
-		"apiKey":          "ollama",
+		"baseUrl":         baseURL,
+		"apiKey":          effectiveAPIKey(apiKey),
 		"provider":        "generic-chat-completion-api",
 		"maxOutputTokens": 64000,
 		"supportsImages":  false,

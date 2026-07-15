@@ -28,10 +28,10 @@ func (p *pool) FindBin() (string, bool) {
 	return "", false
 }
 
-func (p *pool) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
+func (p *pool) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
 	env = []string{
 		"POOLSIDE_STANDALONE_BASE_URL=" + hostV1(host),
-		"POOLSIDE_API_KEY=ollama",
+		"POOLSIDE_API_KEY=" + effectiveAPIKey(apiKey),
 	}
 	args = append([]string{"-m", model}, extra...)
 	return args, env, nil

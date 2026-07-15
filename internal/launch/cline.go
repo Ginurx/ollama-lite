@@ -3,6 +3,7 @@ package launch
 import (
 	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -16,7 +17,7 @@ func (c *cline) Display() string { return "Cline" }
 
 func (c *cline) FindBin() (string, bool) { return lookInstalled("cline") }
 
-func (c *cline) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
+func (c *cline) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
 	home, err := homeDir()
 	if err != nil {
 		return nil, nil, err
@@ -25,7 +26,7 @@ func (c *cline) Prepare(model string, host *url.URL, extra []string) (args, env 
 	providersPath := filepath.Join(home, ".cline", "data", "settings", "providers.json")
 	legacyPath := filepath.Join(home, ".cline", "data", "globalState.json")
 
-	if err := writeClineProviders(providersPath, model, host); err != nil {
+	if err := writeClineProviders(providersPath, model, host, apiKey); err != nil {
 		return nil, nil, err
 	}
 	if err := writeClineLegacyState(legacyPath, model, host); err != nil {
@@ -35,7 +36,7 @@ func (c *cline) Prepare(model string, host *url.URL, extra []string) (args, env 
 	return extra, nil, nil
 }
 
-func writeClineProviders(path, model string, host *url.URL) error {
+func writeClineProviders(path, model string, host *url.URL, apiKey string) error {
 	config, err := readJSONMap(path)
 	if err != nil {
 		return err
@@ -53,7 +54,13 @@ func writeClineProviders(path, model string, host *url.URL) error {
 	settings["provider"] = clineProvider
 	settings["model"] = model
 	settings["baseUrl"] = baseURL
-	delete(settings, "apiKey")
+	// The default open server needs no key; only set one when the operator
+	// configured a shared secret, otherwise leave apiKey absent as before.
+	if apiKey = strings.TrimSpace(apiKey); apiKey != "" {
+		settings["apiKey"] = apiKey
+	} else {
+		delete(settings, "apiKey")
+	}
 	provider["settings"] = settings
 
 	if previousModel != model || previousBaseURL != baseURL || previousTokenSource != "manual" {

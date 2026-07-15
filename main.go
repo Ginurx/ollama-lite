@@ -81,6 +81,9 @@ Environment (shared with the official Ollama):
     OLLAMA_HOST              Address to listen on (default 127.0.0.1:11434)
     OLLAMA_ORIGINS           Extra allowed CORS origins (comma-separated)
     OLLAMA_CLOUD_BASE_URL    Cloud endpoint (default https://ollama.com)
+    OLLAMA_LITE_API_KEY      Shared secret gating the server and authenticating
+                             launched apps (overridden by --api-key on both
+                             serve and launch; unset = open server)
 
 Run "ollama-lite serve --help" for serve flags.
 Run "ollama-lite launch --help" for the list of supported apps.
@@ -91,6 +94,7 @@ func serveCmd(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	models := fs.String("models", "", "comma-separated models to advertise on /api/tags (overrides config)")
 	host := fs.String("host", "", "address to listen on, e.g. 127.0.0.1:11435 or :11434 (overrides OLLAMA_HOST)")
+	apiKey := fs.String("api-key", "", "shared secret required by clients as Authorization: Bearer <key>; gates the server when set (overrides OLLAMA_LITE_API_KEY)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -101,6 +105,7 @@ func serveCmd(args []string) error {
 
 	addr := config.BindAddressFrom(*host)
 	list := config.Models(*models)
+	key := config.APIKey(*apiKey)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -111,8 +116,11 @@ func serveCmd(args []string) error {
 	} else {
 		log.Printf("advertising recommended cloud models on /api/tags (online, from %s/api/experimental/model-recommendations)", config.CloudBaseURL())
 	}
+	if key != "" {
+		log.Printf("requiring API key auth (Authorization: Bearer <key>) on all routes")
+	}
 
-	return server.Serve(ctx, addr, list)
+	return server.Serve(ctx, addr, list, key)
 }
 
 // launchCmd starts an AI app configured to use the ollama-lite server as its
@@ -128,7 +136,7 @@ func launchCmd(args []string) error {
 		}
 	}
 
-	var model, hostOverride, name string
+	var model, hostOverride, apiKey, name string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -146,6 +154,13 @@ func launchCmd(args []string) error {
 			hostOverride, i = args[i+1], i+1
 		case strings.HasPrefix(a, "--host="):
 			hostOverride = strings.TrimPrefix(a, "--host=")
+		case a == "--api-key" || a == "-api-key":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--api-key requires a value")
+			}
+			apiKey, i = args[i+1], i+1
+		case strings.HasPrefix(a, "--api-key="):
+			apiKey = strings.TrimPrefix(a, "--api-key=")
 		case a == "-h" || a == "--help" || a == "help":
 			launchUsage()
 			return nil
@@ -174,6 +189,8 @@ func launchCmd(args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: --host %s is a bind address, not a connectable one; connecting to %s instead. For a remote server, pass its reachable IP (e.g. 127.0.0.1 for local).\n", bindOverride, host.Host)
 	}
 
+	key := config.APIKey(apiKey)
+
 	// Resolve the model. With an explicit --model we use it as-is. Otherwise,
 	// on an interactive terminal, fetch the advertised models from the running
 	// ollama-lite server's /api/tags and show a picker with the saved default
@@ -182,7 +199,7 @@ func launchCmd(args []string) error {
 	if model = strings.TrimSpace(model); model == "" {
 		def := config.LaunchDefaultModel(canonical)
 		if tui.Interactive() {
-			models, err := launch.FetchModelsFromServer(host)
+			models, err := launch.FetchModelsFromServer(host, key)
 			if err != nil {
 				return fmt.Errorf("couldn't reach ollama-lite server at %s: %w\nstart it with 'ollama-lite serve', or pass --model explicitly", host, err)
 			}
@@ -204,7 +221,7 @@ func launchCmd(args []string) error {
 			model = def
 		}
 		if model == "" {
-			if models, err := launch.FetchModelsFromServer(host); err == nil && len(models) > 0 {
+			if models, err := launch.FetchModelsFromServer(host, key); err == nil && len(models) > 0 {
 				model = models[0]
 			}
 		}
@@ -222,7 +239,7 @@ func launchCmd(args []string) error {
 	warnIfServerUnreachable(host)
 
 	log.Printf("launching %s with model %q via %s", canonical, model, host.String())
-	return launch.Launch(canonical, model, extra, host)
+	return launch.Launch(canonical, model, extra, host, key)
 }
 
 func launchUsage() {
@@ -240,6 +257,10 @@ Flags:
                     ~/.ollama-lite/config.json.
     --host HOST     ollama-lite address the app should connect to
                     (overrides OLLAMA_HOST; e.g. 127.0.0.1:11435)
+    --api-key KEY   Shared secret to send as Authorization: Bearer KEY so the app
+                    authenticates against a server started with the same key
+                    (overrides OLLAMA_LITE_API_KEY; omit on both for the default
+                    open behavior).
 
 Supported apps:
 %s

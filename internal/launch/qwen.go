@@ -60,13 +60,13 @@ func (q *qwen) FindBin() (string, bool) {
 	return "", false
 }
 
-func (q *qwen) Prepare(model string, host *url.URL, extra []string) (args, env []string, err error) {
-	if err := q.writeConfig(model, host); err != nil {
+func (q *qwen) Prepare(model string, host *url.URL, extra []string, apiKey string) (args, env []string, err error) {
+	if err := q.writeConfig(model, host, apiKey); err != nil {
 		return nil, nil, err
 	}
 
 	env = []string{
-		"OPENAI_API_KEY=ollama",
+		"OPENAI_API_KEY=" + effectiveAPIKey(apiKey),
 		"OPENAI_BASE_URL=" + hostV1(host),
 		"OPENAI_MODEL=" + model,
 	}
@@ -74,7 +74,7 @@ func (q *qwen) Prepare(model string, host *url.URL, extra []string) (args, env [
 	return args, env, nil
 }
 
-func (q *qwen) writeConfig(model string, host *url.URL) error {
+func (q *qwen) writeConfig(model string, host *url.URL, apiKey string) error {
 	home, err := homeDir()
 	if err != nil {
 		return err
@@ -85,15 +85,15 @@ func (q *qwen) writeConfig(model string, host *url.URL) error {
 	if err != nil {
 		return err
 	}
-	applyQwenConfig(cfg, model, host)
+	applyQwenConfig(cfg, model, host, apiKey)
 	return writeJSON(configPath, cfg)
 }
 
-func applyQwenConfig(cfg map[string]any, model string, host *url.URL) {
+func applyQwenConfig(cfg map[string]any, model string, host *url.URL, apiKey string) {
 	baseURL := hostV1(host)
 
 	envCfg := asMap(cfg["env"])
-	envCfg[qwenEnvKey] = "ollama"
+	envCfg[qwenEnvKey] = effectiveAPIKey(apiKey)
 	cfg["env"] = envCfg
 
 	provider := map[string]any{
