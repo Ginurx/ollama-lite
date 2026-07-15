@@ -77,33 +77,56 @@ func BindAddressFrom(override string) string {
 // rewritten to a loopback address, so an app launched by `ollama-lite launch`
 // dials a reachable address instead of 0.0.0.0. Mirrors envconfig.ConnectableHost.
 func ConnectableHost() *url.URL {
-	return connectable(Host())
+	u := Host()
+	connectable(u)
+	return u
 }
 
 // ConnectableHostFrom returns the connectable host URL, preferring an explicit
-// override (e.g. a --host flag) over the OLLAMA_HOST environment variable.
-func ConnectableHostFrom(override string) *url.URL {
+// override (e.g. a --host flag) over the OLLAMA_HOST environment variable. When
+// an explicit override is an unspecified bind address (0.0.0.0, ::, or an empty
+// host like ":11434"), it is rewritten to loopback and the original override is
+// returned as bindOverride so the caller can warn the user that a bind address is
+// not a connectable one. The OLLAMA_HOST path never returns a bindOverride — it
+// stays silent, mirroring the official Ollama.
+func ConnectableHostFrom(override string) (host *url.URL, bindOverride string) {
 	if override = strings.TrimSpace(override); override != "" {
-		return connectable(hostURL(override))
+		u := hostURL(override)
+		if connectable(u) {
+			bindOverride = override
+		}
+		return u, bindOverride
 	}
-	return ConnectableHost()
+	return ConnectableHost(), ""
 }
 
-// connectable rewrites an unspecified IP host (0.0.0.0 or ::) to loopback.
-func connectable(u *url.URL) *url.URL {
+// connectable rewrites an unspecified or empty host (0.0.0.0, ::, ":port") to a
+// loopback address so the launched app dials a reachable address. It reports
+// whether it made a change, so an explicit --host that was a bind address can be
+// warned about rather than silently misrouted.
+func connectable(u *url.URL) bool {
 	host, port, err := net.SplitHostPort(u.Host)
 	if err != nil {
-		return u
+		return false
 	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
-		if ip.To4() != nil {
-			host = "127.0.0.1"
-		} else {
-			host = "::1"
+	var loopback string
+	switch {
+	case host == "":
+		loopback = "127.0.0.1"
+	default:
+		if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+			if ip.To4() != nil {
+				loopback = "127.0.0.1"
+			} else {
+				loopback = "::1"
+			}
 		}
-		u.Host = net.JoinHostPort(host, port)
 	}
-	return u
+	if loopback == "" {
+		return false
+	}
+	u.Host = net.JoinHostPort(loopback, port)
+	return true
 }
 
 // CloudBaseURL returns the upstream cloud endpoint, overridable via

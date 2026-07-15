@@ -85,7 +85,10 @@ ollama-lite launch codex -- --sandbox workspace-write   # args after -- go to th
   launches can just hit Enter. The picker lists the same models advertised on
   `/api/tags` — configure them with `--models` or `~/.ollama-lite/models.json`.
 - `--host HOST` — the ollama-lite address the app should connect to (overrides
-  `OLLAMA_HOST`); an unspecified bind like `0.0.0.0` is rewritten to loopback.
+  `OLLAMA_HOST`). An unspecified bind address (`0.0.0.0`, `::`, or `:port`) is
+  rewritten to loopback so the app dials a reachable address, and a warning is
+  printed naming the original value; for a remote server, pass its reachable IP
+  (e.g. `192.168.1.10:11434`) instead.
 - Anything after `--` is passed to the app unchanged.
 
 The launch default lives in `~/.ollama-lite/config.json`, which uses the **same

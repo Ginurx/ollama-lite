@@ -169,7 +169,10 @@ func launchCmd(args []string) error {
 		return fmt.Errorf("unknown app %q\n\nSupported apps: %s", name, strings.Join(launch.Supported(), ", "))
 	}
 
-	host := config.ConnectableHostFrom(hostOverride)
+	host, bindOverride := config.ConnectableHostFrom(hostOverride)
+	if bindOverride != "" {
+		fmt.Fprintf(os.Stderr, "Warning: --host %s is a bind address, not a connectable one; connecting to %s instead. For a remote server, pass its reachable IP (e.g. 127.0.0.1 for local).\n", bindOverride, host.Host)
+	}
 
 	// Resolve the model. With an explicit --model we use it as-is. Otherwise,
 	// on an interactive terminal, fetch the advertised models from the running
